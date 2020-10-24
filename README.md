@@ -1,0 +1,1 @@
+# PowerShell-Uninstall-Edge
