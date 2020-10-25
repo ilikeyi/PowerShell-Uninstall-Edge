@@ -1,4 +1,4 @@
-﻿#
+#
 # Author: Yi ( https://fengyi.tel )
 #
 # From: Yi Solution Suite For MSWin Bundled Kit
@@ -15,11 +15,22 @@ Import-Module -DisableNameChecking $PSScriptRoot\..\lib\take-own.psm1
 Write-Output "Elevating privileges for this process"
 do {} until (Elevate-Privileges SeTakeOwnershipPrivilege)
 
+foreach ($item in (Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft\Edge\Application" -directory -ErrorAction SilentlyContinue )) {
+    $filename = $item.FullName+"\Installer\setup.exe"
+    $param = "--uninstall --force-uninstall --system-level"
+
+    if ((Test-Path $filename -PathType Leaf)) {
+        echo "`n   EDGE has been installed, execute the delete command:"
+        Start-Process -FilePath $filename -ArgumentList $param -Wait
+        echo "`   Finish deleting..."
+    } else {
+        Write-Host "   Not found: $filename"
+    }
+}
+
 Write-Output "Uninstalling Edge apps"
 $apps = @(
     "*edge*"
-    "Microsoft.MicrosoftEdgeDevToolsClient"
-    "Microsoft.MicrosoftEdgeDevToolsClient_8wekyb3d8bbwe"
 )
 
 foreach ($app in $apps) {
@@ -33,16 +44,28 @@ foreach ($app in $apps) {
         Remove-AppxProvisionedPackage -Online
 }
 
-foreach ($item in (Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft\Edge\Application" -directory -ErrorAction SilentlyContinue )) {
-    $filename = $item.FullName+"\Installer\setup.exe"
-    $param = "--uninstall --force-uninstall --system-level"
+Write-Output "Force removing Edge apps"
+$needles = @(
+    "*edge*"
+)
 
-    if ((Test-Path $filename -PathType Leaf)) {
-        echo "`n   EDGE has been installed, execute the delete command:"
-        Start-Process -FilePath $filename -ArgumentList $param -Wait
-        echo "`   Finish deleting..."
-    } else {
-        Write-Host "   Not found: $filename"
+foreach ($needle in $needles) {
+    Write-Output "Trying to remove all packages containing $needle"
+
+    $pkgs = (Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\Packages" |
+        Where-Object Name -Like "*$needle*")
+
+    foreach ($pkg in $pkgs) {
+        $pkgname = $pkg.Name.split('\')[-1]
+
+        Takeown-Registry($pkg.Name)
+        Takeown-Registry($pkg.Name + "\Owners")
+
+        Set-ItemProperty -Path ("HKLM:" + $pkg.Name.Substring(18)) -Name Visibility -Value 1
+        New-ItemProperty -Path ("HKLM:" + $pkg.Name.Substring(18)) -Name DefVis -PropertyType DWord -Value 2
+        Remove-Item      -Path ("HKLM:" + $pkg.Name.Substring(18) + "\Owners")
+
+        dism.exe /Online /Remove-Package /PackageName:$pkgname /NoRestart
     }
 }
 
